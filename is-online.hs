@@ -11,29 +11,27 @@ import Network.Wai.Handler.Warp
 import System.Environment
 import System.Exit
 import System.IO
-import System.Locale
 import System.Process
 import Text.Printf
 import qualified Data.ByteString as B
 
 -- a history of heartbeats
 data Ekg = Ekg
-    { missed :: Int
+    { thread :: ThreadId
+    , pings  :: Int
     , online :: Bool
     }
 offline = not . online
 
 data Direction = Incr | Decr
 
-intervalBeat = 60
-ratio = 3
-intervalCheck = intervalBeat `div` ratio
+intervalDead = 70
 
 main = do
     verifyArgs
     putStrLn "Listening on http://localhost:15000"
-    ekg <- newMVar $ Ekg 0 True
-    forkIO $ checkUp ekg
+    dummy <- forkIO $ threadDelay (seconds 1)
+    ekg <- newMVar $ Ekg dummy 0 True
     run 15000 (app ekg)
 
 verifyArgs :: IO ()
@@ -62,55 +60,52 @@ app ekg req = case rawPathInfo req of
 pong ekg = do
     liftIO $ do
         putStrLn "I was pinged."
-        maybeOnline ekg Decr
+        awaitDeath ekg
+        e <- readMVar ekg
+        when (offline e) (incrPings ekg)
     okText "pong"
 index = okText "Try /ping"
 
--- look for missing heartbeats
-checkUp :: MVar Ekg -> IO ()
-checkUp ekg = do
-    threadDelay $ seconds intervalCheck
-    _ <- forkIO $ maybeOnline ekg Incr
-    checkUp ekg
+-- assume the device will die shortly
+awaitDeath :: MVar Ekg -> IO ()
+awaitDeath ekg = do
+    e <- takeMVar ekg
+    killThread $ thread e
+    t <- forkIO $ do
+        threadDelay $ seconds intervalDead
+        markOffline ekg
+    putMVar ekg $ e{thread=t}
 
--- decide whether our online status has changed
-maybeOnline :: MVar Ekg -> Direction -> IO ()
-maybeOnline ekg dir = do
-    previous <- takeMVar ekg
-    let m = missed previous
-    let n = case dir of
-                Incr -> m+1
-                Decr -> bound 0 ratio (m-2*ratio)
-    let new = previous{missed=n}
-    putMVar ekg new
-    putStrLn $ "maybe online. " ++ showEkg new
-    when (n == ratio+1 && online previous) (markOffline ekg)
-    when (n == 0 && offline previous) (markOnline ekg)
+-- increment the pings count
+incrPings :: MVar Ekg -> IO ()
+incrPings ekg = do
+    e <- readMVar ekg
+    when (online e) (error "Shouldn't increment pings when online")
+    let n = pings e + 1
+    if n >= 3
+        then markOnline ekg
+        else (swapMVar ekg $ e{pings=n}) >> return ()
 
+-- the device just went offline
 markOffline :: MVar Ekg -> IO ()
 markOffline ekg = do
-    previous <- takeMVar ekg
-    putStrLn "status -> offline"
-    putMVar ekg $ previous{online=False}
-    runScript "offline"
+    e <- takeMVar ekg
+    when (online e) $ do
+        putStrLn "status -> offline"
+        runScript "offline"
+    putMVar ekg $ e{online=False,pings=0}
 
+-- the device came back online
 markOnline :: MVar Ekg -> IO ()
 markOnline ekg = do
-    previous <- takeMVar ekg
-    putStrLn "status -> online"
-    putMVar ekg $ previous{online=True}
-    runScript "online"
+    e <- takeMVar ekg
+    when (offline e) $ do
+        putStrLn "status -> online"
+        runScript "online"
+    putMVar ekg $ e{online=True,pings=0}
 
 -- convert seconds into microseconds (for threadDelay)
 seconds = (1000000*)
-
--- keep 'n' between upper ('u') and lower ('l') bounds, respectively
-bound :: Int -> Int -> Int -> Int
-bound l u n =
-    case (n < l, n > u) of
-        (True,_) -> l
-        (_, True) -> u
-        (False,False) -> n
 
 textResponse status body = return $ ResponseBuilder
     status
@@ -118,6 +113,3 @@ textResponse status body = return $ ResponseBuilder
     $ fromByteString body
     where len = fromString . show . B.length
 okText = textResponse status200
-
-showEkg :: Ekg -> String
-showEkg ekg = printf "%d missed" (missed ekg)
