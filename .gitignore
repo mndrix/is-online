@@ -1,0 +1,5 @@
+*.swp
+*.hi
+*.o
+Setup.hs
+is-online
