@@ -19,8 +19,8 @@ import qualified Data.ByteString as B
 data Ekg = Ekg
     { thread :: ThreadId
     , pings  :: Int
-    , online :: Bool
     }
+online = (<0) . pings
 offline = not . online
 
 data Direction = Incr | Decr
@@ -31,7 +31,7 @@ main = do
     verifyArgs
     putStrLn "Listening on http://localhost:15000"
     dummy <- forkIO $ threadDelay (seconds 1)
-    ekg <- newMVar $ Ekg dummy 0 True
+    ekg <- newMVar $ Ekg dummy (negate 1)
     run 15000 (app ekg)
 
 verifyArgs :: IO ()
@@ -93,7 +93,7 @@ markOffline ekg = do
     when (online e) $ do
         putStrLn "status -> offline"
         runScript "offline"
-    putMVar ekg $ e{online=False,pings=0}
+    putMVar ekg $ e{pings=0}
 
 -- the device came back online
 markOnline :: MVar Ekg -> IO ()
@@ -102,7 +102,7 @@ markOnline ekg = do
     when (offline e) $ do
         putStrLn "status -> online"
         runScript "online"
-    putMVar ekg $ e{online=True,pings=0}
+    putMVar ekg $ e{pings=negate 1}
 
 -- convert seconds into microseconds (for threadDelay)
 seconds = (1000000*)
