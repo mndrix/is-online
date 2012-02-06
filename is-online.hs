@@ -25,7 +25,7 @@ offline = not . online
 
 data Direction = Incr | Decr
 
-intervalDead = 70
+intervalDead = minutes 11
 
 main = do
     verifyArgs
@@ -72,7 +72,7 @@ awaitDeath ekg = do
     e <- takeMVar ekg
     killThread $ thread e
     t <- forkIO $ do
-        threadDelay $ seconds intervalDead
+        threadDelay intervalDead
         markOffline ekg
     putMVar ekg $ e{thread=t}
 
@@ -82,7 +82,7 @@ incrPings ekg = do
     e <- readMVar ekg
     when (online e) (error "Shouldn't increment pings when online")
     let n = pings e + 1
-    if n >= 3
+    if n >= 2
         then markOnline ekg
         else (swapMVar ekg $ e{pings=n}) >> return ()
 
@@ -106,6 +106,7 @@ markOnline ekg = do
 
 -- convert seconds into microseconds (for threadDelay)
 seconds = (1000000*)
+minutes = (1000000*) . (60*)
 
 textResponse status body = return $ ResponseBuilder
     status
