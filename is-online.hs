@@ -5,12 +5,16 @@ import Control.Concurrent.MVar
 import Control.Monad
 import Control.Monad.Trans
 import Data.String
+import Data.Time.Clock
+import Data.Time.Format
+import Data.Time.LocalTime
 import Network.HTTP.Types
 import Network.Wai
 import Network.Wai.Handler.Warp
 import System.Environment
 import System.Exit
 import System.IO
+import System.Locale
 import System.Process
 import Text.Printf
 import qualified Data.ByteString as B
@@ -60,6 +64,9 @@ app ekg req = case rawPathInfo req of
 pong ekg = do
     liftIO $ do
         putStrLn "I was pinged."
+        tz <- getCurrentTimeZone
+        now <- utcToLocalTime tz `fmap` getCurrentTime
+        putStrLn $ formatTime defaultTimeLocale "%F %T" now
         awaitDeath ekg
         e <- readMVar ekg
         when (offline e) (incrPings ekg)
